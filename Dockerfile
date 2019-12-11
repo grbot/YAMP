@@ -1,6 +1,5 @@
 FROM debian:jessie
 
-ENV CONDA_INSTALLER="Miniconda3-latest-Linux-x86_64.sh"
 #Exports conda path
 ENV PATH $PATH:/opt/conda/bin/
 
@@ -18,8 +17,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     gzip \
     perl && \
-    wget --quiet https://repo.continuum.io/miniconda/${CONDA_INSTALLER} && \
-    /bin/bash /${CONDA_INSTALLER} -b -p /opt/conda && \
+    wget --quiet https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh && \
+    /bin/bash /Miniconda3-latest-Linux-x86_64.sh -b -p /opt/conda && \
     /opt/conda/bin/conda install --yes conda && \
     conda install conda-build && \
     #Update conda and uses it to install software used by YAMP
