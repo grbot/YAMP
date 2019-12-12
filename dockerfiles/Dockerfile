@@ -19,3 +19,5 @@ ENV PATH /opt/conda/bin:$PATH
 
 COPY environment.yml /
 RUN conda env create -f /environment.yml && conda clean -a
+
+ENV PATH /usr/local/envs/yamp/bin/:$PATH
