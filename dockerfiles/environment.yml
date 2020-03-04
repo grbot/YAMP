@@ -1,0 +1,17 @@
+# You can use this file to create a conda environment for this pipeline:
+# # conda env create -f environment.yml
+name: yamp
+channels:
+  - bioconda
+  - defaults
+  - conda-forge
+dependencies:
+  - bbmap
+  - fastqc
+  - multiqc
+  - lzstring
+  - spectra
+  - metaphlan2
+  - qiime
+  - humann2
+  - python=2.7

@@ -40,6 +40,9 @@ def helpMessage() {
     MetaPhlAn2 parameters: 
       --bt2options 		   Presets options for BowTie2, default="very-sensitive"
       
+    Strainphlan parameters (optional):
+      --strain_of_interest	   Strain for tracking across samples in metaphlan2 format e.g. s__Bacteroides_caccae
+      
     Other options:
       --keepCCtmpfile		    Whether the temporary files resulting from MetaPhlAn2 and HUMAnN2 should be kept, default=false
       --outdir                      The output directory where the results will be saved
@@ -60,6 +63,7 @@ params.name = false
 //params.project = false
 params.email = false
 params.plaintext_email = false
+params.strain_of_interest = false
 
 // Show help emssage
 params.help = false
@@ -136,8 +140,12 @@ log.info "========================================="
  */
 
 process runFastQC {
+    cache 'deep'
     tag { "rFQC.${pairId}" }
-    publishDir "${params.outdir}/FilterAndTrim", mode: "copy", overwrite: false
+
+    cache 'deep'
+
+    publishDir "${params.outdir}/FilterAndTrim", mode: "copy"
 
     input:
         set pairId, file(in_fastq) from ReadPairsToQual
@@ -154,8 +162,12 @@ process runFastQC {
 }
 
 process runMultiQC{
+    cache 'deep'
     tag { "rMQC" }
-    publishDir "${params.outdir}/FilterAndTrim", mode: 'copy', overwrite: false
+
+    cache 'deep'
+
+    publishDir "${params.outdir}/FilterAndTrim", mode: 'copy'
 
     input:
         file('*') from fastqc_files.collect()
@@ -175,8 +187,9 @@ process runMultiQC{
  */
 
 process dedup {
+	cache 'deep'
 	tag { "dedup.${pairId}" }
-
+	cache 'deep'
 	input:
 	set val(pairId), file(reads) from ReadPairs
 
@@ -184,10 +197,10 @@ process dedup {
 	set val(pairId), file("${pairId}_dedupe_R1.fq"), file("${pairId}_dedupe_R2.fq") into totrim, topublishdedupe
 
 	script:
-	"""
-	maxmem=\$(echo ${task.memory} | sed 's/ //g' | sed 's/B//g')
+        markdup_java_options = (task.memory.toGiga() < 8) ? ${params.markdup_java_options} : "\"-Xms" +  (task.memory.toGiga()/10 )+"g "+ "-Xmx" + (task.memory.toGiga() - 8)+ "g\""
 
-	clumpify.sh -Xmx\"\$maxmem\" in1="${reads[0]}" in2="${reads[1]}" out1=${pairId}_dedupe_R1.fq out2=${pairId}_dedupe_R2.fq \
+	"""
+	clumpify.sh ${markdup_java_options} in1="${reads[0]}" in2="${reads[1]}" out1=${pairId}_dedupe_R1.fq out2=${pairId}_dedupe_R2.fq \
 	qin=$params.qin dedupe subs=0 threads=${task.cpus}
 	
 	"""
@@ -201,8 +214,9 @@ process dedup {
  */
 
 process bbduk {
+	cache 'deep'
 	tag{ "bbduk.${pairId}" }
-	
+	cache 'deep'
 	//bbduk reference files
 	adapters_ref = file(params.adapters)
 	artifacts_ref = file(params.artifacts)
@@ -219,23 +233,23 @@ process bbduk {
 	set val(pairId), file("${pairId}_trimmed_R1.fq"), file("${pairId}_trimmed_R2.fq") into filteredReadsforQC
 
 	script:
-	"""	
-	maxmem=\$(echo ${task.memory} | sed 's/ //g' | sed 's/B//g')
+	markdup_java_options = (task.memory.toGiga() < 8) ? ${params.markdup_java_options} : "\"-Xms" +  (task.memory.toGiga()/10 )+"g "+ "-Xmx" + (task.memory.toGiga()-8)+ "g\""
 
+	"""	
 	#Quality and adapter trim:
-	bbduk.sh -Xmx\"\$maxmem\" in=${pairId}_dedupe_R1.fq in2=${pairId}_dedupe_R2.fq out=${pairId}_trimmed_R1_tmp.fq \
+	bbduk.sh ${markdup_java_options} in=${pairId}_dedupe_R1.fq in2=${pairId}_dedupe_R2.fq out=${pairId}_trimmed_R1_tmp.fq \
 	out2=${pairId}_trimmed_R2_tmp.fq outs=${pairId}_trimmed_singletons_tmp.fq ktrim=r \
-	k=$params.kcontaminants mink=$params.mink hdist=$params.hdist qtrim=rl trimq=$params.phred \
+	k=$params.kcontaminants tossjunk=t mink=$params.mink hdist=$params.hdist qtrim=rl trimq=$params.phred \
 	minlength=$params.minlength ref=$adapters qin=$params.qin threads=${task.cpus} tbo tpe 
 	
 	#Synthetic contaminants trim:
-	bbduk.sh -Xmx\"\$maxmem\" in=${pairId}_trimmed_R1_tmp.fq in2=${pairId}_trimmed_R2_tmp.fq \
-	out=${pairId}_trimmed_R1.fq out2=${pairId}_trimmed_R2.fq k=31 ref=$phix174ill,$artifacts \
+	bbduk.sh ${markdup_java_options} in=${pairId}_trimmed_R1_tmp.fq in2=${pairId}_trimmed_R2_tmp.fq \
+	out=${pairId}_trimmed_R1.fq tossjunk=t out2=${pairId}_trimmed_R2.fq k=31 ref=$phix174ill,$artifacts \
 	qin=$params.qin threads=${task.cpus} 
 
 	#Synthetic contaminants trim for singleton reads:
-	bbduk.sh -Xmx\"\$maxmem\" in=${pairId}_trimmed_singletons_tmp.fq out=${pairId}_trimmed_singletons.fq \
-	k=31 ref=$phix174ill,$artifacts qin=$params.qin threads=${task.cpus}
+	bbduk.sh ${markdup_java_options} in=${pairId}_trimmed_singletons_tmp.fq out=${pairId}_trimmed_singletons.fq \
+	k=31 ref=$phix174ill,$artifacts tossjunk=t qin=$params.qin threads=${task.cpus}
 
 	#Removes tmp files. This avoids adding them to the output channels
 	rm -rf ${pairId}_trimmed*_tmp.fq 
@@ -251,8 +265,12 @@ process bbduk {
  */
 
 process runFastQC_postfilterandtrim {
+    cache 'deep'
     tag { "rFQC_post_FT.${pairId}" }
-    publishDir "${params.outdir}/FastQC_post_filter_trim", mode: "copy", overwrite: false
+
+    cache 'deep'
+
+    publishDir "${params.outdir}/FastQC_post_filter_trim", mode: "copy"
 
     input:
     	set val(pairId), file("${pairId}_trimmed_R1.fq"), file("${pairId}_trimmed_R2.fq") from filteredReadsforQC
@@ -269,8 +287,12 @@ process runFastQC_postfilterandtrim {
 }
 
 process runMultiQC_postfilterandtrim {
+	cache 'deep'
     tag { "rMQC_post_FT" }
-    publishDir "${params.outdir}/FastQC_post_filter_trim", mode: 'copy', overwrite: false
+
+    cache 'deep'
+
+    publishDir "${params.outdir}/FastQC_post_filter_trim", mode: 'copy'
 
     input:
         file('*') from fastqc_files_2.collect()
@@ -290,8 +312,12 @@ process runMultiQC_postfilterandtrim {
  */
 
 process decontaminate {
+	cache 'deep'
 	tag{ "decon.${pairId}" }
-	publishDir  "${params.outdir}/decontaminate" , mode: 'copy', pattern: "*_clean.fq.gz", overwrite: false
+
+	cache 'deep'
+
+	publishDir  "${params.outdir}/decontaminate" , mode: 'copy', pattern: "*_clean.fq.gz"
 	cache 'deep'
 	
 	refForeignGenome_ref = file(params.refForeignGenome, type: 'dir')
@@ -306,11 +332,12 @@ process decontaminate {
 	set val(pairId), file("${pairId}_cont.fq") into topublishdecontaminate
 	
 	script:
+	markdup_java_options = (task.memory.toGiga() < 8) ? ${params.markdup_java_options} : "\"-Xms" +  (task.memory.toGiga()/10 )+"g "+ "-Xmx" + (task.memory.toGiga()-8)+ "g\""
+
 	"""
-	maxmem=\$(echo ${task.memory} | sed 's/ //g' | sed 's/B//g')
 	
 	#Decontaminate from foreign genomes
-	bbwrap.sh  -Xmx\"\$maxmem\" mapper=bbmap append=t in1=${pairId}_trimmed_R1.fq,${pairId}_trimmed_singletons.fq in2=${pairId}_trimmed_R2.fq,null \
+	bbwrap.sh  ${markdup_java_options} mapper=bbmap append=t in1=${pairId}_trimmed_R1.fq,${pairId}_trimmed_singletons.fq in2=${pairId}_trimmed_R2.fq,null \
 	outu=${pairId}_clean.fq outm=${pairId}_cont.fq minid=$params.mind \
 	maxindel=$params.maxindel bwr=$params.bwr bw=12 minhits=2 qtrim=rl trimq=$params.phred \
 	path=$refForeignGenome qin=$params.qin threads=${task.cpus} untrim quickmatch fast
@@ -328,9 +355,11 @@ process decontaminate {
  */
 
 process metaphlan2 {
+	cache 'deep'
 	tag{ "metaphlan2.${pairId}" }
-	
-	publishDir  "${params.outdir}/metaphlan2", mode: 'copy', pattern: "*.{biom,tsv}", overwrite: false
+
+	publishDir  "${params.outdir}/metaphlan2", mode: 'copy', pattern: "*.tsv"
+
 	
 	mpa_pkl_ref = file(params.mpa_pkl)
 	bowtie2db_ref = file(params.bowtie2db, type: 'dir')
@@ -341,9 +370,9 @@ process metaphlan2 {
 	file bowtie2db from bowtie2db_ref
 
     	output:
-    	file "${pairId}.biom"
 	file "${pairId}_metaphlan_profile.tsv" into metaphlantohumann2, metaphlantomerge
 	file "${pairId}_bt2out.txt" into topublishprofiletaxa
+	file "${pairId}_sam.bz2" into strainphlan
 
 
 	script:
@@ -353,6 +382,7 @@ process metaphlan2 {
 
 	#Estimate taxon abundances
 	metaphlan2.py --input_type fastq --tmp_dir=. --biom ${pairId}.biom --bowtie2out=${pairId}_bt2out.txt \
+	--samout ${pairId}_sam.bz2 \
 	--mpa_pkl $mpa_pkl  --bowtie2db $bowtie2db/$params.bowtie2dbfiles --bt2_ps $params.bt2options --nproc ${task.cpus} \
 	$infile ${pairId}_metaphlan_profile.tsv
 
@@ -367,9 +397,10 @@ process metaphlan2 {
  */
 
 process merge_metaphlan2 {
+	cache 'deep'
 	tag{ "merge_metaphlan2_table" }
 	
-	publishDir  "${params.outdir}/metaphlan2", mode: 'copy', overwrite: false
+	publishDir  "${params.outdir}/metaphlan2", mode: 'copy'
 	
 	input: file('*') from metaphlantomerge.collect()
 	
@@ -392,8 +423,12 @@ process merge_metaphlan2 {
  */	
 
 process humann2 {
+	cache 'deep'
 	tag{ "humann2.${pairId}" }
-	publishDir  "${params.outdir}/humann2", mode: 'copy', pattern: "*.{tsv,log}", overwrite: false
+
+	cache 'deep'
+
+	publishDir  "${params.outdir}/humann2", mode: 'copy', pattern: "*.{tsv,log}"
 	
 	chocophlan_ref = file(params.chocophlan, type: 'dir')
 	uniref_ref = file(params.uniref, type: 'dir')
@@ -445,16 +480,50 @@ process humann2 {
  	"""
 }
 
+/*
+ *
+ * Step 9: Strainphlan
+ *
+ */
 
+process strainphlan {
+	cache 'deep'
+	tag{ "strainphlan" }
+	
+	publishDir  "${params.outdir}/strainphlan", mode: 'copy'
+	
+	when:
+  	params.strain_of_interest
+  
+	input: 
+	file('*') from strainphlan.collect()
+	
+	output: 
+	file ""
+	
+	script:
+	"""
+	sample2markers.py --ifn_samples *.sam.bz2 --input_type sam --output_dir . --nprocs ${task.cpus} &> log.txt
+	
+	extract_markers.py --mpa_pkl $mpa_pkl --ifn_markers $metaphlan_markers \
+	--clade $strain_of_interest --ofn_markers "${strain_of_interest}.markers.fasta"
+	
+	strainphlan.py --mpa_pkl $mpa_pkl --ifn_samples *.markers --output_dir . --nprocs_main ${task.cpus} --print_clades_only > strainphlan_clades.txt
+
+	"""
+	
+	
+}
 
 
 /*
  *
- * Step 9:  Save tmp files from metaphlan2 and humann2 if requested
+ * Step 10:  Save tmp files from metaphlan2 and humann2 if requested
  *
  */	
 	
 process saveCCtmpfile {
+	cache 'deep'
 	tag{ "saveCCtmpfile" }
 	publishDir  "${params.outdir}/CCtmpfiles", mode: 'copy'
 		
@@ -475,7 +544,7 @@ process saveCCtmpfile {
 
 /*
  *
- * Step 10: Completion e-mail notification
+ * Step 11: Completion e-mail notification
  *
  */
 workflow.onComplete {
